@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Assistente de Nutrição IA</title>
-    <script src="https://unpkg.com/htmx.org@1.9.2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -16,7 +15,7 @@
 <body class="bg-gradient-to-r from-green-50 to-blue-50 min-h-screen">
     <div class="container mx-auto px-4 py-12">
         <h1 class="text-4xl font-bold mb-8 text-center text-gray-800">Assistente de Nutrição IA</h1>
-        <form hx-post="/gerar_dieta" hx-target="#resultado" class="max-w-lg mx-auto bg-white p-8 rounded-xl shadow-lg">
+        <form id="dietForm" class="max-w-lg mx-auto bg-white p-8 rounded-xl shadow-lg">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <label for="idade" class="block text-gray-700 font-medium mb-2">Idade</label>
@@ -66,8 +65,42 @@
                 Gerar Plano de Dieta
             </button>
         </form>
-        <div id="resultado" class="mt-8 text-center"></div>
+        
+        <div id="loading" class="mt-4 text-center hidden">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+            <p class="mt-2 text-gray-600">Gerando seu plano de dieta personalizado...</p>
+        </div>
+
+        <div id="mensagem" class="mt-4 text-center text-green-600 font-semibold"></div>
     </div>
+
+    <script>
+        document.getElementById('dietForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('mensagem').textContent = '';
+
+            fetch('/gerar_dieta', {
+                method: 'POST',
+                body: new FormData(this)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.filename) {
+                    document.getElementById('mensagem').textContent = `Plano de dieta gerado com sucesso e salvo como ${data.filename}`;
+                } else {
+                    throw new Error('Erro ao gerar o plano de dieta');
+                }
+            })
+            .catch(error => {
+                console.error('Erro:', error);
+                document.getElementById('mensagem').textContent = 'Ocorreu um erro ao gerar o plano de dieta. Por favor, tente novamente.';
+            })
+            .finally(() => {
+                document.getElementById('loading').classList.add('hidden');
+            });
+        });
+    </script>
 </body>
 </html>
 

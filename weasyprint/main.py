@@ -1,29 +1,40 @@
+import logging
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from langchain_core.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
 from langchain.chains import LLMChain
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from guardrails import Guard
-from weasyprint import HTML
+from fpdf import FPDF
 import dotenv
 import os
 import json
+import uuid
 
 dotenv.load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 templates = Jinja2Templates(directory="./templates")
 
-anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
-if not anthropic_api_key:
-    raise ValueError("Variável de ambiente ANTHROPIC_API_KEY não está definida")
+# Diretório para salvar os PDFs
+PDF_DIR = "pdfs"
+if not os.path.exists(PDF_DIR):
+    os.makedirs(PDF_DIR)
 
-llm = ChatAnthropic(
-    anthropic_api_key=anthropic_api_key,
-    model_name="claude-3-sonnet-20240229",
-    max_tokens=4096,
-    temperature=0.7
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    raise ValueError("Variável de ambiente OPENAI_API_KEY não está definida")
+
+llm = ChatOpenAI(
+    model="gpt-4",
+    temperature=0,
+    max_tokens=None,
+    timeout=None,
+    max_retries=2,
+    api_key=openai_api_key
 )
 
 rail_spec = """
@@ -49,7 +60,7 @@ rail_spec = """
         <object name="plano_refeicoes">
             <string name="detalhamento" description="Descrição do plano de refeições" />
         </object>
-        <list name="Refeições" description="5 refeições diárias">
+        <list name="refeições" description="5 refeições diárias">
             <object>
                 <string name="refeicao" description="Nome da refeição" />
                 <string name="nome" description="Nome da receita" />
@@ -193,78 +204,48 @@ Certifique-se de seguir rigorosamente o formato solicitado e preencher todos os 
 """)
 ])
 
-
-
 chain = LLMChain(llm=llm, prompt=prompt_template)
 
-def generate_html_report(plano_dieta):
-    html_content = f"""
-    <html>
-    <head>
-        <style>
-            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-            h1 {{ color: #2c3e50; text-align: center; }}
-            h2 {{ color: #34495e; margin-top: 20px; }}
-            h3 {{ color: #2980b9; }}
-            ul {{ padding-left: 20px; }}
-            .recipe {{ background-color: #f9f9f9; padding: 15px; margin-bottom: 20px; border-radius: 5px; }}
-            table {{ border-collapse: collapse; width: 100%; margin-bottom: 15px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #f2f2f2; }}
-        </style>
-    </head>
-    <body>
-        <h1>Plano de Dieta Personalizado</h1>
-        
-        <h2>Informações Gerais</h2>
-        <ul>
-            <li><strong>Calorias Diárias:</strong> {plano_dieta['calorias']}</li>
-            <li><strong>Macronutrientes:</strong> {plano_dieta['macronutrientes']}</li>
-            <li><strong>Consumo de Água:</strong> {plano_dieta['Consumo de água']}</li>
-            <li><strong>Consumo de Fibras:</strong> {plano_dieta['Consumo de fibras']}</li>
-            <li><strong>Suplementação:</strong> {plano_dieta['Suplementação']}</li>
-        </ul>
-        
-        <h2>Plano de Refeições</h2>
-        <p>{plano_dieta['plano_refeicoes']['detalhamento']}</p>
-        
-        <h2>Refeições</h2>
-        {''.join([f"""
-        <div class="recipe">
-            <h3>{receita['refeicao']} - {receita['nome']}</h3>
-            <h4>Ingredientes:</h4>
-            <table>
-                <tr>
-                    <th>Ingrediente</th>
-                    <th>Proteína (g)</th>
-                    <th>Carboidrato (g)</th>
-                    <th>Gordura (g)</th>
-                </tr>
-                {''.join([f"""
-                <tr>
-                    <td>{ingrediente['nome']}</td>
-                    <td>{ingrediente['proteina']}</td>
-                    <td>{ingrediente['carboidrato']}</td>
-                    <td>{ingrediente['gordura']}</td>
-                </tr>
-                """ for ingrediente in receita['ingredientes']])}
-            </table>
-            <h4>Instruções:</h4>
-            <p>{receita['instrucoes']}</p>
-        </div>
-        """ for receita in plano_dieta['refeições']])}
-        
-        <h2>Dicas de Nutrição e Estilo de Vida</h2>
-        <ul>
-            {''.join([f'<li>{dica}</li>' for dica in plano_dieta['dicas']])}
-        </ul>
+def generate_pdf_report(plano_dieta):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="Plano de Dieta Personalizado", ln=True, align='C')
 
-        <h2>Observações Adicionais</h2>
-        <p>{plano_dieta['observacoes']}</p>
-    </body>
-    </html>
-    """
-    return html_content
+    # Adicionando informações gerais
+    pdf.multi_cell(0, 10, txt=f"Calorias: {plano_dieta['calorias']}")
+    pdf.multi_cell(0, 10, txt=f"Macronutrientes: {plano_dieta['macronutrientes']}")
+    pdf.multi_cell(0, 10, txt=f"Consumo de água: {plano_dieta['Consumo de água']}")
+    pdf.multi_cell(0, 10, txt=f"Consumo de fibras: {plano_dieta['Consumo de fibras']}")
+    pdf.multi_cell(0, 10, txt=f"Suplementação: {plano_dieta['Suplementação']}")
+
+    # Adicionando plano de refeições
+    pdf.multi_cell(0, 10, txt=f"Plano de Refeições: {plano_dieta['plano_refeicoes']['detalhamento']}")
+
+    # Adicionando refeições
+    for refeicao in plano_dieta['refeições']:
+        pdf.multi_cell(0, 10, txt=f"\n{refeicao['refeicao']} - {refeicao['nome']}")
+        pdf.multi_cell(0, 10, txt="Ingredientes:")
+        for ingrediente in refeicao['ingredientes']:
+            pdf.multi_cell(0, 10, txt=f"- {ingrediente['nome']}: Proteína {ingrediente['proteina']}g, Carboidrato {ingrediente['carboidrato']}g, Gordura {ingrediente['gordura']}g")
+        pdf.multi_cell(0, 10, txt=f"Instruções: {refeicao['instrucoes']}")
+
+    # Adicionando dicas
+    pdf.multi_cell(0, 10, txt="\nDicas:")
+    for dica in plano_dieta['dicas']:
+        pdf.multi_cell(0, 10, txt=f"- {dica}")
+
+    # Adicionando observações
+    pdf.multi_cell(0, 10, txt=f"\nObservações: {plano_dieta['observacoes']}")
+
+    # Gerando um nome de arquivo único
+    filename = f"plano_dieta_{uuid.uuid4()}.pdf"
+    filepath = os.path.join(PDF_DIR, filename)
+
+    # Salvando o PDF
+    pdf.output(filepath)
+
+    return filename
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
@@ -281,6 +262,7 @@ async def gerar_dieta(
     restricoes_alimentares: str = Form(...)
 ):
     try:
+        logging.info("Iniciando geração de plano de dieta")
         input_data = {
             "idade": idade,
             "genero": genero,
@@ -290,30 +272,32 @@ async def gerar_dieta(
             "objetivos": objetivos,
             "restricoes_alimentares": restricoes_alimentares
         }
+        logging.info(f"Dados de entrada: {input_data}")
         
         resposta = chain.invoke(input_data)
-        print("Resposta do modelo:", resposta)  # Para debug
+        logging.info("Resposta do modelo obtida")
+        logging.info(f"Resposta do modelo: {resposta['text']}")
         
-        # Extrair o conteúdo da resposta
-        if isinstance(resposta, dict) and 'text' in resposta:
-            conteudo = resposta['text']
-        else:
-            conteudo = str(resposta)
+        validated_output = guard(lambda: resposta['text'])
+        logging.info("JSON validado pelo guard")
         
-        try:
-            plano_dieta = json.loads(conteudo)['plano_dieta']
-        except json.JSONDecodeError:
-            raise ValueError("A resposta do modelo não está no formato JSON esperado")
+        plano_dieta = json.loads(validated_output)['plano_dieta']
+        logging.info("JSON parseado com sucesso")
         
-        html_content = generate_html_report(plano_dieta)
+        filename = generate_pdf_report(plano_dieta)
+        logging.info(f"PDF gerado: {filename}")
         
-        pdf_path = "plano_dieta.pdf"
-        HTML(string=html_content).write_pdf(pdf_path)
+        return JSONResponse(content={"message": "Plano de dieta gerado com sucesso", "filename": filename})
         
-        return FileResponse(pdf_path, filename="seu_plano_dieta.pdf", media_type="application/pdf")
-        
+    except json.JSONDecodeError as e:
+        logging.error(f"Erro ao decodificar JSON: {e}")
+        return JSONResponse(status_code=500, content={"error": "Erro ao processar resposta do modelo"})
+    except KeyError as e:
+        logging.error(f"Chave não encontrada no JSON: {e}")
+        return JSONResponse(status_code=500, content={"error": "Estrutura da resposta do modelo inválida"})
     except Exception as e:
-        return {"error": f"Erro ao processar: {str(e)}"}
+        logging.error(f"Erro não esperado: {str(e)}")
+        return JSONResponse(status_code=500, content={"error": f"Erro ao processar: {str(e)}"})
 
 if __name__ == "__main__":
     import uvicorn
